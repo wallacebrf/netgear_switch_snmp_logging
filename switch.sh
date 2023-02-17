@@ -1,5 +1,5 @@
 #!/bin/bash
-#Version 1/18/2023
+#Version 2/14/2023
 
 #This script pulls SNMP data off Netgear XS7xx series switches like the XS708T, XS716T etc
 
@@ -317,11 +317,11 @@ if [ -r "$config_file" ]; then
 					
 					port_names_raw=`snmpwalk -v3 -l authPriv -u $snmp_user -a $snmp_auth_protocol -A $AuthPass1 -x $snmp_privacy_protocol -X $PrivPass2 $switch_url:161 1.3.6.1.2.1.47.1.1.1.1.7 -Oqv`
 
-					explode=(`echo $port_names_raw | sed 's/,/\n/g'`)
+					port_names=(`echo $port_names_raw | sed 's/,/\n/g'`)
 
 					ii=0
 					while [ $ii -lt 20 ]; do
-						port_names[$ii]="${explode[$ii]//"\""}"
+						port_names[$ii]="${port_names[$ii]//"\""}"
 						let ii=ii+1
 					done
 					
@@ -339,9 +339,21 @@ if [ -r "$config_file" ]; then
 						let ii=ii+1
 					done
 					
+					#port data received in octet, or one byte
+					port_data_received_raw=`snmpwalk -v3 -l authPriv -u $snmp_user -a $snmp_auth_protocol -A $AuthPass1 -x $snmp_privacy_protocol -X $PrivPass2 $switch_url:161 1.3.6.1.2.1.31.1.1.1.6 -Oqv`
+
+					port_data_received=(`echo $port_data_received_raw | sed 's/,/\n/g'`)
+					
+					#port data sent in octet, or one byte
+					port_data_sent_raw=`snmpwalk -v3 -l authPriv -u $snmp_user -a $snmp_auth_protocol -A $AuthPass1 -x $snmp_privacy_protocol -X $PrivPass2 $switch_url:161 1.3.6.1.2.1.31.1.1.1.10 -Oqv`
+
+					port_data_sent=(`echo $port_data_sent_raw | sed 's/,/\n/g'`)
+					
 					#System details to post
-					post_url=$post_url"$measurement,switch_name=$switch_name MAC_temp=$MAC_temp,PHY_temp=$PHY_temp,MAC_temp_STATUS=$MAC_temp_STATUS,PHY_temp_STATUS=$PHY_temp_STATUS,FAN1_SPEED=$FAN1_SPEED,FAN2_SPEED=$FAN2_SPEED,FAN1_DUTY=$FAN1_DUTY,FAN2_DUTY=$FAN2_DUTY,FAN1_STATUS=$FAN1_STATUS,FAN2_STATUS=$FAN2_STATUS
-			"
+					
+						post_url=$post_url"$measurement,switch_name=$switch_name MAC_temp=$MAC_temp,PHY_temp=$PHY_temp,MAC_temp_STATUS=$MAC_temp_STATUS,PHY_temp_STATUS=$PHY_temp_STATUS,FAN1_SPEED=$FAN1_SPEED,FAN2_SPEED=$FAN2_SPEED,FAN1_DUTY=$FAN1_DUTY,FAN2_DUTY=$FAN2_DUTY,FAN1_STATUS=$FAN1_STATUS,FAN2_STATUS=$FAN2_STATUS,port1_status=${port_status[0]},port2_status=${port_status[1]},port3_status=${port_status[2]},port4_status=${port_status[3]},port5_status=${port_status[4]},port6_status=${port_status[5]},port7_status=${port_status[6]},port8_status=${port_status[7]},port9_status=${port_status[8]},port10_status=${port_status[9]},port11_status=${port_status[10]},port12_status=${port_status[11]},port13_status=${port_status[12]},port14_status=${port_status[13]},port15_status=${port_status[14]},port16_status=${port_status[15]},port1_data_received=${port_data_received[0]},port2_data_received=${port_data_received[1]},port3_data_received=${port_data_received[2]},port4_data_received=${port_data_received[3]},port5_data_received=${port_data_received[4]},port6_data_received=${port_data_received[5]},port7_data_received=${port_data_received[6]},port8_data_received=${port_data_received[7]},port9_data_received=${port_data_received[8]},port10_data_received=${port_data_received[9]},port11_data_received=${port_data_received[10]},port12_data_received=${port_data_received[11]},port13_data_received=${port_data_received[12]},port14_data_received=${port_data_received[13]},port15_data_received=${port_data_received[14]},port16_data_received=${port_data_received[15]},port1_data_sent=${port_data_sent[0]},port2_data_sent=${port_data_sent[1]},port3_data_sent=${port_data_sent[2]},port4_data_sent=${port_data_sent[3]},port5_data_sent=${port_data_sent[4]},port6_data_sent=${port_data_sent[5]},port7_data_sent=${port_data_sent[6]},port8_data_sent=${port_data_sent[7]},port9_data_sent=${port_data_sent[8]},port10_data_sent=${port_data_sent[9]},port11_data_sent=${port_data_sent[10]},port12_data_sent=${port_data_sent[11]},port13_data_sent=${port_data_sent[12]},port14_data_sent=${port_data_sent[13]},port15_data_sent=${port_data_sent[14]},port16_data_sent=${port_data_sent[15]},port1_VLAN_ID=${port_vlan_ID[0]},port2_VLAN_ID=${port_vlan_ID[1]},port3_VLAN_ID=${port_vlan_ID[2]},port4_VLAN_ID=${port_vlan_ID[3]},port5_VLAN_ID=${port_vlan_ID[4]},port6_VLAN_ID=${port_vlan_ID[5]},port7_VLAN_ID=${port_vlan_ID[6]},port8_VLAN_ID=${port_vlan_ID[7]},port9_VLAN_ID=${port_vlan_ID[8]},port10_VLAN_ID=${port_vlan_ID[9]},port11_VLAN_ID=${port_vlan_ID[10]},port12_VLAN_ID=${port_vlan_ID[11]},port13_VLAN_ID=${port_vlan_ID[12]},port14_VLAN_ID=${port_vlan_ID[13]},port15_VLAN_ID=${port_vlan_ID[14]},port16_VLAN_ID=${port_vlan_ID[15]}"
+					
+					
 			
 				secondString=""
 				post_url=${post_url//\"/$secondString}
