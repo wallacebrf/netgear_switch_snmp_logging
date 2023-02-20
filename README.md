@@ -12,12 +12,14 @@ need to add to readme
 
 4.) Configuration of synology web server "http" user permissions 
 
-5.) Configuration of fortigate's SNMP settings 
+5.) Configuration of netgear switch SNMP settings 
 
 6.) Configuration of required settings in the PHP page 
 
 7.) Test running the ".sh" file for the first time 
 
-8.) Configuration of crontab 9.) Grafana Dashboards 
+8.) Configuration of crontab 
+
+9.) Grafana Dashboards 
 
 10.) Optional Performance Improvement
