@@ -1,5 +1,5 @@
 #!/bin/bash
-#Version 2/14/2023
+#Version 3/17/2023
 
 #This script pulls SNMP data off Netgear XS7xx series switches like the XS708T, XS716T etc
 
@@ -37,7 +37,7 @@ email_contents="/volume1/web/logging/notifications/1st_floor_bedroom_switch_emai
 #EMAIL SETTINGS USED IF CONFIGURATION FILE IS UNAVAILABLE
 #These variables will be overwritten with new corrected data if the configuration file loads properly. 
 email_address="email@email.com"
-from_email_address="from@email.com"
+from_email_address="email@email.us"
 #########################################################
 
 #track if any of these items have caused the script to send an email. if an email was sent, then at the end of script we will save the time it was sent
@@ -47,49 +47,66 @@ fan0=0
 fan1=0
 snmp_error=0
 
+#########################################################
+#this function pings google.com to confirm internet access is working prior to sending email notifications 
+#########################################################
+check_internet() {
+ping -c1 "www.google.com" > /dev/null #ping google.com									
+	local status=$?
+	if ! (exit $status); then
+		false
+	else
+		true
+	fi
+}
+
 #####################################
 #Function to send email when SNMP commands fail
 #####################################
 function SNMP_error_email(){
-	#determine when the last time a general notification email was sent out. this will make sure we send an email only every x minutes
-	current_time=$( date +%s )
-	if [ -r "$last_time_email_sent" ]; then
-		read email_time < $last_time_email_sent
-		email_time_diff=$((( $current_time - $email_time ) / 60 ))
-	else 
-		echo "$current_time" > $last_time_email_sent
-		email_time_diff=0
-	fi
-	
-	local now=$(date +"%T")
-	local mailbody="$now - ALERT Switch at IP $switch_url named \"$switch_name\" appears to have an issue with SNMP as it returned invalid data"
-	echo "from: $from_email_address " > $email_contents
-	echo "to: $email_address " >> $email_contents
-	echo "subject: ALERT Switch at IP $switch_url named \"$switch_name\" appears to have an issue with SNMP " >> $email_contents
-	echo "" >> $email_contents
-	echo $mailbody >> $email_contents
-			
-	if [[ "$email_address" == "" || "$from_email_address" == "" ]];then
-			echo -e "\n\nNo email address information is configured, Cannot send an email the switch returned invalid SNMP data"
-	else
-		if [ $sendmail_installed -eq 1 ]; then	
-			if [ $email_time_diff -ge $email_interval ]; then
-				local email_response=$(sendmail -t < $email_contents  2>&1)
-				if [[ "$email_response" == "" ]]; then
-					echo -e "\n\nEmail Sent Successfully that the target switch appears to have an issue with SNMP" |& tee -a $email_contents
-					snmp_error=1
-					current_time=$( date +%s )
-					echo "$current_time" > $last_time_email_sent
-					email_time_diff=0
+	if check_internet; then
+		#determine when the last time a general notification email was sent out. this will make sure we send an email only every x minutes
+		current_time=$( date +%s )
+		if [ -r "$last_time_email_sent" ]; then
+			read email_time < $last_time_email_sent
+			email_time_diff=$((( $current_time - $email_time ) / 60 ))
+		else 
+			echo "$current_time" > $last_time_email_sent
+			email_time_diff=$(( $email_interval + 1 ))
+		fi
+		
+		local now=$(date +"%T")
+		local mailbody="$now - ALERT Switch at IP $switch_url named \"$switch_name\" appears to have an issue with SNMP as it returned invalid data"
+		echo "from: $from_email_address " > $email_contents
+		echo "to: $email_address " >> $email_contents
+		echo "subject: ALERT Switch at IP $switch_url named \"$switch_name\" appears to have an issue with SNMP " >> $email_contents
+		echo "" >> $email_contents
+		echo $mailbody >> $email_contents
+				
+		if [[ "$email_address" == "" || "$from_email_address" == "" ]];then
+				echo -e "\n\nNo email address information is configured, Cannot send an email the switch returned invalid SNMP data"
+		else
+			if [ $sendmail_installed -eq 1 ]; then	
+				if [ $email_time_diff -ge $email_interval ]; then
+					local email_response=$(sendmail -t < $email_contents  2>&1)
+					if [[ "$email_response" == "" ]]; then
+						echo -e "\n\nEmail Sent Successfully that the target switch appears to have an issue with SNMP" |& tee -a $email_contents
+						snmp_error=1
+						current_time=$( date +%s )
+						echo "$current_time" > $last_time_email_sent
+						email_time_diff=0
+					else
+						echo -e "\n\nWARNING -- An error occurred while sending Error email. The error was: $email_response\n\n" |& tee $email_contents
+					fi	
 				else
-					echo -e "\n\nWARNING -- An error occurred while sending Error email. The error was: $email_response\n\n" |& tee $email_contents
+					echo "Only $email_time_diff minuets have passed since the last notification, email will be sent every $email_interval minutes. $(( $email_interval - $email_time_diff )) Minutes Remaining Until Next Email"
 				fi	
 			else
-				echo "Only $email_time_diff minuets have passed since the last notification, email will be sent every $email_interval minutes. $(( $email_interval - $email_time_diff )) Minutes Remaining Until Next Email"
-			fi	
-		else
-			echo -e "\n\nERROR -- Could not send alert email that an error occurred getting SNMP data -- command \"sendmail\" is not available\n\n"
+				echo -e "\n\nERROR -- Could not send alert email that an error occurred getting SNMP data -- command \"sendmail\" is not available\n\n"
+			fi
 		fi
+	else
+		echo "Internet is not available, skipping sending email"
 	fi
 	exit 1
 }
@@ -373,36 +390,40 @@ if [ -r "$config_file" ]; then
 					if [ $sendmail_installed -eq 1 ]; then
 						if [ $MAC_temp -ge $max_mac_temp ]
 						then
-							#determine when the last time a general notification email was sent out. this will make sure we send an email only every x minutes
-							current_time=$( date +%s )
-							if [ -r "$last_time_email_sent" ]; then
-								read email_time < $last_time_email_sent
-								email_time_diff=$((( $current_time - $email_time ) / 60 ))
-							else 
-								echo "$current_time" > $last_time_email_sent
-								email_time_diff=0
-							fi
-							
-							#echo the hardware temp has been exceeded
-							if [ $email_time_diff -ge $email_interval ]
-							then
-							#echo the email has not been sent in over x minutes, re-sending email
-								now=$(date +"%T")
-								mailbody="$now - Warning the temperature of \"$switch_name\" MAC has exceeded $max_mac_temp Degrees C / $max_mac_temp_f Degrees F "
-								echo "from: $from_email_address " > $email_contents
-								echo "to: $email_address " >> $email_contents
-								echo "subject: \"$switch_name\" MAC Temperature Warning " >> $email_contents
-								echo "" >> $email_contents
-								echo $mailbody >> $email_contents
-								email_response=$(sendmail -t < $email_contents  2>&1)
-								if [[ "$email_response" == "" ]]; then
-									echo -e "\nEmail Sent Successfully that MAC temperature is too high\n\n" |& tee -a $email_contents
-									mac0=1 #make note that the email was sent
+							if check_internet; then
+								#determine when the last time a general notification email was sent out. this will make sure we send an email only every x minutes
+								current_time=$( date +%s )
+								if [ -r "$last_time_email_sent" ]; then
+									read email_time < $last_time_email_sent
+									email_time_diff=$((( $current_time - $email_time ) / 60 ))
+								else 
+									echo "$current_time" > $last_time_email_sent
+									email_time_diff=$(( $email_interval + 1 ))
+								fi
+								
+								#echo the hardware temp has been exceeded
+								if [ $email_time_diff -ge $email_interval ]
+								then
+								#echo the email has not been sent in over x minutes, re-sending email
+									now=$(date +"%T")
+									mailbody="$now - Warning the temperature of \"$switch_name\" MAC has exceeded $max_mac_temp Degrees C / $max_mac_temp_f Degrees F "
+									echo "from: $from_email_address " > $email_contents
+									echo "to: $email_address " >> $email_contents
+									echo "subject: \"$switch_name\" MAC Temperature Warning " >> $email_contents
+									echo "" >> $email_contents
+									echo $mailbody >> $email_contents
+									email_response=$(sendmail -t < $email_contents  2>&1)
+									if [[ "$email_response" == "" ]]; then
+										echo -e "\nEmail Sent Successfully that MAC temperature is too high\n\n" |& tee -a $email_contents
+										mac0=1 #make note that the email was sent
+									else
+										echo -e "\n\n WARNING -- An error occurred while sending email. the error was: $email_response\n\n" |& tee $email_contents
+									fi	
 								else
-									echo -e "\n\n WARNING -- An error occurred while sending email. the error was: $email_response\n\n" |& tee $email_contents
-								fi	
+									echo -e "\n\nAnother email notification will be sent in $(( $email_interval - $email_time_diff)) Minutes"
+								fi
 							else
-								echo -e "\n\nAnother email notification will be sent in $(( $email_interval - $email_time_diff)) Minutes"
+								echo "Internet is not available, skipping sending email"
 							fi
 						fi
 
@@ -415,27 +436,31 @@ if [ -r "$config_file" ]; then
 								email_time_diff=$((( $current_time - $email_time ) / 60 ))
 							else 
 								echo "$current_time" > $last_time_email_sent
-								email_time_diff=0
+								email_time_diff=$(( $email_interval + 1 ))
 							fi
 							
 							#echo the hardware temp has been exceeded
 							if [ $email_time_diff -ge $email_interval ]
 							then
 							#echo the email has not been sent in over 1 hour, re-sending email
-								now=$(date +"%T")
-								mailbody="$now - Warning the temperature of \"$switch_name\" PHY has exceeded $max_phy_temp Degrees C / $max_phy_temp_f Degrees F "
-								echo "from: $from_email_address " > $email_contents
-								echo "to: $email_address " >> $email_contents
-								echo "subject: \"$switch_name\" PHY Temperature Warning " >> $email_contents
-								echo "" >> $email_contents
-								echo $mailbody >> $email_contents
-								email_response=$(sendmail -t < $email_contents  2>&1)
-								if [[ "$email_response" == "" ]]; then
-									echo -e "\nEmail Sent Successfully that PHY temperature is too high\n\n" |& tee -a $email_contents
-									phy0=1 #make note that the email was sent
+								if check_internet; then
+									now=$(date +"%T")
+									mailbody="$now - Warning the temperature of \"$switch_name\" PHY has exceeded $max_phy_temp Degrees C / $max_phy_temp_f Degrees F "
+									echo "from: $from_email_address " > $email_contents
+									echo "to: $email_address " >> $email_contents
+									echo "subject: \"$switch_name\" PHY Temperature Warning " >> $email_contents
+									echo "" >> $email_contents
+									echo $mailbody >> $email_contents
+									email_response=$(sendmail -t < $email_contents  2>&1)
+									if [[ "$email_response" == "" ]]; then
+										echo -e "\nEmail Sent Successfully that PHY temperature is too high\n\n" |& tee -a $email_contents
+										phy0=1 #make note that the email was sent
+									else
+										echo -e "\n\n WARNING -- An error occurred while sending email. the error was: $email_response\n\n" |& tee $email_contents
+									fi	
 								else
-									echo -e "\n\n WARNING -- An error occurred while sending email. the error was: $email_response\n\n" |& tee $email_contents
-								fi	
+									echo "Internet is not available, skipping sending email"
+								fi
 							else
 								echo -e "\n\nAnother email notification will be sent in $(( $email_interval - $email_time_diff)) Minutes"
 							fi
@@ -451,27 +476,31 @@ if [ -r "$config_file" ]; then
 									email_time_diff=$((( $current_time - $email_time ) / 60 ))
 								else 
 									echo "$current_time" > $last_time_email_sent
-									email_time_diff=0
+									email_time_diff=$(( $email_interval + 1 ))
 								fi
 								
 								#echo the hardware temp has been exceeded
 								if [ $email_time_diff -ge $email_interval ]
 								then
 								#echo the email has not been sent in over 1 hour, re-sending email
-									now=$(date +"%T")
-									mailbody="$now - Warning \"$switch_name\" Fan#1 Speed has dropped below $minimum_fan_speed RPM "
-									echo "from: $from_email_address " > $email_contents
-									echo "to: $email_address " >> $email_contents
-									echo "subject: \"$switch_name\" Fan Speed Warning " >> $email_contents
-									echo "" >> $email_contents
-									echo $mailbody >> $email_contents
-									email_response=$(sendmail -t < $email_contents  2>&1)
-									if [[ "$email_response" == "" ]]; then
-										echo -e "\nEmail Sent Successfully that Fan#1 speed is too low\n\n" |& tee -a $email_contents
-										fan0=1 #make note that the email was sent
+									if check_internet; then
+										now=$(date +"%T")
+										mailbody="$now - Warning \"$switch_name\" Fan#1 Speed has dropped below $minimum_fan_speed RPM "
+										echo "from: $from_email_address " > $email_contents
+										echo "to: $email_address " >> $email_contents
+										echo "subject: \"$switch_name\" Fan Speed Warning " >> $email_contents
+										echo "" >> $email_contents
+										echo $mailbody >> $email_contents
+										email_response=$(sendmail -t < $email_contents  2>&1)
+										if [[ "$email_response" == "" ]]; then
+											echo -e "\nEmail Sent Successfully that Fan#1 speed is too low\n\n" |& tee -a $email_contents
+											fan0=1 #make note that the email was sent
+										else
+											echo -e "\n\n WARNING -- An error occurred while sending email. the error was: $email_response\n\n" |& tee $email_contents
+										fi	
 									else
-										echo -e "\n\n WARNING -- An error occurred while sending email. the error was: $email_response\n\n" |& tee $email_contents
-									fi	
+										echo "Internet is not available, skipping sending email"
+									fi
 								else
 									echo -e "\n\nAnother email notification will be sent in $(( $email_interval - $email_time_diff)) Minutes"
 								fi
@@ -488,27 +517,31 @@ if [ -r "$config_file" ]; then
 									email_time_diff=$((( $current_time - $email_time ) / 60 ))
 								else 
 									echo "$current_time" > $last_time_email_sent
-									email_time_diff=0
+									email_time_diff=$(( $email_interval + 1 ))
 								fi
 								
 								#echo the hardware temp has been exceeded
 								if [ $email_time_diff -ge $email_interval ]
 								then
 								#echo the email has not been sent in over 1 hour, re-sending email
-									now=$(date +"%T")
-									mailbody="$now - Warning \"$switch_name\" Fan#2 Speed has dropped below $minimum_fan_speed RPM "
-									echo "from: $from_email_address " > $email_contents
-									echo "to: $email_address " >> $email_contents
-									echo "subject: Server Switch Fan Speed Warning " >> $email_contents
-									echo "" >> $email_contents
-									echo $mailbody >> $email_contents
-									email_response=$(sendmail -t < $email_contents  2>&1)
-									if [[ "$email_response" == "" ]]; then
-										echo -e "\nEmail Sent Successfully that Fan#2 speed is too low\n\n" |& tee -a $email_contents
-										fan1=1 #make note that the email was sent
+									if check_internet; then
+										now=$(date +"%T")
+										mailbody="$now - Warning \"$switch_name\" Fan#2 Speed has dropped below $minimum_fan_speed RPM "
+										echo "from: $from_email_address " > $email_contents
+										echo "to: $email_address " >> $email_contents
+										echo "subject: Server Switch Fan Speed Warning " >> $email_contents
+										echo "" >> $email_contents
+										echo $mailbody >> $email_contents
+										email_response=$(sendmail -t < $email_contents  2>&1)
+										if [[ "$email_response" == "" ]]; then
+											echo -e "\nEmail Sent Successfully that Fan#2 speed is too low\n\n" |& tee -a $email_contents
+											fan1=1 #make note that the email was sent
+										else
+											echo -e "\n\n WARNING -- An error occurred while sending email. the error was: $email_response\n\n" |& tee $email_contents
+										fi	
 									else
-										echo -e "\n\n WARNING -- An error occurred while sending email. the error was: $email_response\n\n" |& tee $email_contents
-									fi	
+										echo "Internet is not available, skipping sending email"
+									fi
 								else
 									echo -e "\n\nAnother email notification will be sent in $(( $email_interval - $email_time_diff)) Minutes"
 								fi
@@ -559,36 +592,40 @@ if [ -r "$config_file" ]; then
 			email_time_diff=$((( $current_time - $email_time ) / 60 ))
 		else 
 			echo "$current_time" > $last_time_email_sent
-			email_time_diff=0
+			email_time_diff=$(( $email_interval + 1 ))
 		fi
 		
 		echo "Target device at $switch_url is unavailable, skipping script"
 		now=$(date +"%T")
 		if [ $email_time_diff -ge $email_interval ]; then
-			#send an email indicating script config file is missing and script will not run
-			mailbody="$now - Warning Switch SNMP Monitoring Failed for device IP $switch_url - Target is Unavailable "
-			echo "from: $from_email_address " > $email_contents
-			echo "to: $email_address " >> $email_contents
-			echo "subject: Warning Switch SNMP Monitoring Failed for device IP $switch_url - Target is Unavailable " >> $email_contents
-			echo "" >> $email_contents
-			echo $mailbody >> $email_contents
-			
-			if [[ "$email_address" == "" || "$from_email_address" == "" ]];then
-				echo -e "\n\nNo email address information is configured, Cannot send an email indicating Target is Unavailable and script will not run"
-			else
-				if [ $sendmail_installed -eq 1 ]; then
-					email_response=$(sendmail -t < $email_contents  2>&1)
-					if [[ "$email_response" == "" ]]; then
-						echo -e "\nEmail Sent Successfully indicating Target is Unavailable and script will not run" |& tee -a $email_contents
-						current_time=$( date +%s )
-						echo "$current_time" > $last_time_email_sent
-						email_time_diff=0
-					else
-						echo -e "\n\nWARNING -- An error occurred while sending email. The error was: $email_response\n\n" |& tee $email_contents
-					fi	
+			if check_internet; then
+				#send an email indicating script config file is missing and script will not run
+				mailbody="$now - Warning Switch SNMP Monitoring Failed for device IP $switch_url - Target is Unavailable "
+				echo "from: $from_email_address " > $email_contents
+				echo "to: $email_address " >> $email_contents
+				echo "subject: Warning Switch SNMP Monitoring Failed for device IP $switch_url - Target is Unavailable " >> $email_contents
+				echo "" >> $email_contents
+				echo $mailbody >> $email_contents
+				
+				if [[ "$email_address" == "" || "$from_email_address" == "" ]];then
+					echo -e "\n\nNo email address information is configured, Cannot send an email indicating Target is Unavailable and script will not run"
 				else
-					echo "Unable to send email, \"sendmail\" command is unavailable"
+					if [ $sendmail_installed -eq 1 ]; then
+						email_response=$(sendmail -t < $email_contents  2>&1)
+						if [[ "$email_response" == "" ]]; then
+							echo -e "\nEmail Sent Successfully indicating Target is Unavailable and script will not run" |& tee -a $email_contents
+							current_time=$( date +%s )
+							echo "$current_time" > $last_time_email_sent
+							email_time_diff=0
+						else
+							echo -e "\n\nWARNING -- An error occurred while sending email. The error was: $email_response\n\n" |& tee $email_contents
+						fi	
+					else
+						echo "Unable to send email, \"sendmail\" command is unavailable"
+					fi
 				fi
+			else
+				echo "Internet is not available, skipping sending email"
 			fi
 		else
 			echo -e "\n\nAnother email notification will be sent in $(( $email_interval - $email_time_diff)) Minutes"
@@ -603,36 +640,40 @@ else
 		email_time_diff=$((( $current_time - $email_time ) / 60 ))
 	else 
 		echo "$current_time" > $last_time_email_sent
-		email_time_diff=0
+		email_time_diff=61
 	fi
 	
 	now=$(date +"%T")
 	echo "Configuration file for script \"${0##*/}\" is missing, skipping script and will send alert email every 60 minuets"
 	if [ $email_time_diff -ge 60 ]; then
-		#send an email indicating script config file is missing and script will not run
-		mailbody="$now - Warning Switch SNMP Monitoring Failed for script \"${0##*/}\" - Configuration file is missing "
-		echo "from: $from_email_address " > $email_contents
-		echo "to: $email_address " >> $email_contents
-		echo "subject: Warning Switch SNMP Monitoring Failed for script \"${0##*/}\" - Configuration file is missing " >> $email_contents
-		echo "" >> $email_contents
-		echo $mailbody >> $email_contents
-		
-		if [[ "$email_address" == "" || "$from_email_address" == "" ]];then
-			echo -e "\n\nNo email address information is configured, Cannot send an email indicating script \"${0##*/}\" config file is missing and script will not run"
-		else
-			if [ $sendmail_installed -eq 1 ]; then
-				email_response=$(sendmail -t < $email_contents  2>&1)
-				if [[ "$email_response" == "" ]]; then
-					echo -e "\nEmail Sent Successfully indicating script \"${0##*/}\" config file is missing and script will not run" |& tee -a $email_contents
-					current_time=$( date +%s )
-					echo "$current_time" > $last_time_email_sent
-					email_time_diff=0
-				else
-					echo -e "\n\nWARNING -- An error occurred while sending email. The error was: $email_response\n\n" |& tee $email_contents
-				fi	
+		if check_internet; then
+			#send an email indicating script config file is missing and script will not run
+			mailbody="$now - Warning Switch SNMP Monitoring Failed for script \"${0##*/}\" - Configuration file is missing "
+			echo "from: $from_email_address " > $email_contents
+			echo "to: $email_address " >> $email_contents
+			echo "subject: Warning Switch SNMP Monitoring Failed for script \"${0##*/}\" - Configuration file is missing " >> $email_contents
+			echo "" >> $email_contents
+			echo $mailbody >> $email_contents
+			
+			if [[ "$email_address" == "" || "$from_email_address" == "" ]];then
+				echo -e "\n\nNo email address information is configured, Cannot send an email indicating script \"${0##*/}\" config file is missing and script will not run"
 			else
-				echo "Unable to send email, \"sendmail\" command is unavailable"
+				if [ $sendmail_installed -eq 1 ]; then
+					email_response=$(sendmail -t < $email_contents  2>&1)
+					if [[ "$email_response" == "" ]]; then
+						echo -e "\nEmail Sent Successfully indicating script \"${0##*/}\" config file is missing and script will not run" |& tee -a $email_contents
+						current_time=$( date +%s )
+						echo "$current_time" > $last_time_email_sent
+						email_time_diff=0
+					else
+						echo -e "\n\nWARNING -- An error occurred while sending email. The error was: $email_response\n\n" |& tee $email_contents
+					fi	
+				else
+					echo "Unable to send email, \"sendmail\" command is unavailable"
+				fi
 			fi
+		else
+			echo "Internet is not available, skipping sending email"
 		fi
 	else
 		echo -e "\n\nAnother email notification will be sent in $(( 60 - $email_time_diff)) Minutes"
